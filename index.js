@@ -94,3 +94,89 @@ export function onElementReplaced(element, cb) {
   // retorna un "off"
   return () => observer.disconnect();
 }
+
+/**
+ * Observa cambios internos de un elemento (hijos, texto y/o atributos).
+ * @param {Element} element - Elemento a observar.
+ * @param {(info: {
+ *   element: Element,
+ *   mutations: MutationRecord[],
+ *   summary: { added: Element[], removed: Element[], textChanged: number, attributesChanged: Record<string, number> }
+ * }) => void} cb - Callback al detectar cambios.
+ * @param {Object} [options]
+ * @param {boolean} [options.childList=true] - Detectar nodos hijos añadidos/quitados.
+ * @param {boolean} [options.characterData=true] - Detectar cambios en texto.
+ * @param {boolean} [options.attributes=false] - Detectar cambios de atributos.
+ * @param {string[]} [options.attributeFilter] - Filtrar atributos específicos (ej. ['class','style']).
+ * @param {boolean} [options.subtree=true] - Incluir todo el subárbol (contenido interno).
+ * @param {number} [options.debounce=0] - Agrupar cambios en una ventana (ms).
+ * @param {boolean} [options.once=false] - Dejar de observar después del primer disparo.
+ * @returns {() => void} Función para dejar de observar.
+ */
+export function onElementContentChange(element, cb, options = {}) {
+  if (!(element instanceof Element)) {
+    throw new Error("onElementContentChange: 'element' debe ser un Element del DOM");
+  }
+
+  const {
+    childList = true,
+    characterData = true,
+    attributes = false,
+    attributeFilter,
+    subtree = true,
+    debounce = 0,
+    once = false
+  } = options;
+
+  let timer = null;
+  let queue = [];
+
+  const observer = new MutationObserver((mutations) => {
+    queue.push(...mutations);
+    if (debounce > 0) {
+      clearTimeout(timer);
+      timer = setTimeout(flush, debounce);
+    } else {
+      flush();
+    }
+  });
+
+  function summarizeMutations(muts) {
+    const summary = {
+      added: [],
+      removed: [],
+      textChanged: 0,
+      attributesChanged: {}
+    };
+
+    for (const m of muts) {
+      if (m.type === "childList") {
+        for (const n of m.addedNodes) if (n.nodeType === 1) summary.added.push(n);
+        for (const n of m.removedNodes) if (n.nodeType === 1) summary.removed.push(n);
+      } else if (m.type === "characterData") {
+        summary.textChanged++;
+      } else if (m.type === "attributes") {
+        const name = m.attributeName || "_";
+        summary.attributesChanged[name] = (summary.attributesChanged[name] || 0) + 1;
+      }
+    }
+    return summary;
+  }
+
+  function flush() {
+    if (queue.length === 0) return;
+    const batch = queue;
+    queue = [];
+    cb({ element, mutations: batch, summary: summarizeMutations(batch) });
+    if (once) observer.disconnect();
+  }
+
+  observer.observe(element, {
+    childList,
+    characterData,
+    attributes,
+    attributeFilter,
+    subtree
+  });
+
+  return () => observer.disconnect();
