@@ -180,3 +180,4 @@ export function onElementContentChange(element, cb, options = {}) {
   });
 
   return () => observer.disconnect();
+}
